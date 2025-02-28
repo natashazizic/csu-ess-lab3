@@ -1,0 +1,15 @@
+---
+title: "Lab 3: Covid-19"
+subtitle: 'Ecosystem Science and Sustainability 330'
+author:
+  - name: Natasha Zizic
+    email: nzizic@colostate.edu
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(flextable)
+library(zoo) 
+```
