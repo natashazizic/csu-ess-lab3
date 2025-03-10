@@ -13,3 +13,415 @@ library(tidyverse)
 library(flextable)
 library(zoo) 
 ```
+
+Question 1:
+
+```{r}
+url = 'https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv'
+covid = read.csv(url)
+head(covid, 5)
+```
+
+How does easy access to historical and real-time environmental data shape our understanding of climate trends, resource management, and public health? What happens when this data disappears or becomes inaccessible?
+
+Easy access to historical and current data has dramatically improved our knowledge of these topics. Since we are able to see the data over time, it is much easier to understand how things have changed over time as well as the current state of things. Unfortunately, we are so reliant on this data that when it becomes inaccessible, it can have negative consequences. For example, when data is not regularly updated, but people are expecting updated information, it is much more likely that there will be a spread of misinformation.
+
+Question 2:
+
+```{r}
+my.date <- as.Date("2022-02-01")
+my.state <- "Colorado"
+```
+
+```{r}
+co_data <- covid |>
+  filter(state == my.state)|>
+  group_by(county) |>
+  arrange(date) |>
+  mutate(new_cases = cases - lag(cases, default = first(cases)),
+         new_deaths = deaths - lag(deaths, default = first(deaths))) |>
+  ungroup()
+
+```
+
+```{r}
+latest_data <- co_data |>
+  filter(date == my.date)
+
+```
+
+```{r}
+top5_cumulative <- latest_data |>
+  arrange(desc(cases)) |>
+  slice(1:5) |>
+  select(county, cases)
+
+top5_new_cases <- latest_data |>
+  arrange(desc(new_cases)) |>
+  slice(1:5) |>
+  select(county, new_cases)
+
+```
+
+```{r}
+safe_counties <- latest_data |>
+  filter(new_cases < 100) |>
+  select(county)
+
+```
+
+```{r}
+total_new_cases <- sum(latest_data$new_cases, na.rm = TRUE)
+total_cumulative_cases <- sum(latest_data$cases, na.rm = TRUE)
+num_safe_counties <- nrow(safe_counties)
+
+```
+
+```{r}
+knitr::kable(top5_cumulative, caption = "Top 5 Counties by Cumulative Cases")
+knitr::kable(top5_new_cases, caption = "Top 5 Counties by New Cases")
+knitr::kable(safe_counties, caption = "Counties Considered Safe")
+
+```
+
+Question 3:
+
+```{r}
+pop_url <- 'https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv'
+pop_data <- read_csv(pop_url)
+head(pop_data,5)
+```
+
+```{r}
+pop_data <- pop_data %>%
+  mutate(
+    STATE = as.numeric(as.character(STATE)),  
+    COUNTY = as.numeric(as.character(COUNTY)),
+    STATE = sprintf("%02d", STATE),  
+    COUNTY = sprintf("%03d", COUNTY), 
+    FIPS = paste0(STATE, COUNTY)
+  )
+```
+
+```{r}
+pop_data <- pop_data |>
+  filter(COUNTY != "000") |>
+  select(FIPS, contains("NAME"), contains("2021"))
+```
+
+```{r}
+glimpse(pop_data)
+```
+
+```{r}
+glimpse(co_data)
+```
+
+The data has 19 columns and 3144 rows. There only a few columns similar to the covid data, including the state and the number of deaths, for example.
+
+```{r}
+range(pop_data$POPESTIMATE2021, na.rm = TRUE)
+
+```
+
+The range of populations in Colorado counties in 2021 is 54 to 9809462.
+
+```{r}
+co_data <- co_data %>% rename(FIPS = `fips`)
+```
+
+```{r}
+co_data <- co_data |> mutate(FIPS = as.character(FIPS))
+pop_data <- pop_data |> mutate(FIPS = as.character(FIPS))
+```
+
+```{r}
+library(tidyverse)
+
+co_data <- co_data %>%
+  mutate(FIPS = sprintf("%05d", as.numeric(FIPS)))
+
+pop_data <- pop_data %>%
+  mutate(FIPS = as.character(FIPS))
+
+covid_pop_data <- co_data %>%
+  left_join(pop_data, by = "FIPS") %>%
+  mutate(
+    per_capita_cases = cases / POPESTIMATE2021,
+    per_capita_new_cases = new_cases / POPESTIMATE2021,
+    per_capita_new_deaths = new_deaths / POPESTIMATE2021
+  )
+
+glimpse(covid_pop_data)
+
+```
+
+```{r}
+library(flextable)
+
+top_cumulative_cases <- covid_pop_data %>%
+  filter(date == "2021-01-01") %>%
+  arrange(desc(per_capita_cases)) %>%
+  slice_head(n = 5) %>%
+  select(County = CTYNAME, 'Total Cases Per Capita' = per_capita_cases)
+
+flextable(top_cumulative_cases) %>%
+  set_caption("Top 5 Counties with Most Cumulative Cases per Capita on 2021-01-01")
+
+```
+
+```{r}
+top_new_cases <- covid_pop_data %>%
+  filter(date == "2021-01-01") %>%
+  arrange(desc(per_capita_new_cases)) %>%
+  slice_head(n = 5) %>%
+  select(County = CTYNAME, `New Cases Per Capita` = per_capita_cases)
+
+flextable(top_new_cases) %>%
+  set_caption("Top 5 Counties with Most New Cases per Capita on 2021-01-01")
+
+```
+
+Question 4:
+
+```{r}
+library(tidyverse)
+
+covid_pop_data <- covid_pop_data %>%
+  mutate(date = as.Date(my.date))
+
+last_14_days <- covid_pop_data %>%
+  filter(date >= (max(date) - 14)) %>%
+  glimpse()
+```
+
+```{r}
+rolling_cases <- last_14_days %>%
+  group_by(CTYNAME) %>%
+  summarize(
+    total_new_cases = sum(new_cases, na.rm = TRUE), 
+    population = unique(POPESTIMATE2021)
+  ) %>%
+  mutate(new_cases_per_100k = (total_new_cases / population) * 100000) %>%
+  ungroup()%>%
+  glimpse()
+
+```
+
+```{r}
+top_5_counties <- rolling_cases %>%
+  arrange(desc(new_cases_per_100k)) %>%
+  slice_head(n = 5) %>%
+  select(county = CTYNAME, `new cases per 100k` = new_cases_per_100k) %>%
+  flextable() %>%
+  set_caption("Top 5 Counties with the Most New Cases per 100k Residents (Last 14 Days)")
+```
+
+```{r}
+top_5_counties
+```
+
+```{r}
+watchlist_count <- rolling_cases %>%
+  filter(new_cases_per_100k > 100) %>%
+  nrow()
+
+print(watchlist_count)
+
+```
+
+There are 64 counties that meet the watch list condition.
+
+Question 5:
+
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+covid_deaths_2021 <- covid_pop_data %>%
+  filter(format(date, "%Y") == "2021") %>%
+  group_by(CTYNAME) %>%
+  summarize(total_covid_deaths = sum(new_deaths, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+colnames(covid_pop_data)
+```
+
+```{r}
+county_deaths <- left_join(covid_deaths_2021, pop_data, by = c("CTYNAME" = "CTYNAME"))|>
+  glimpse()
+```
+
+```{r}
+county_deaths <- county_deaths %>%
+  mutate(covid_death_percentage = (total_covid_deaths / DEATHS2021) * 100)
+```
+
+```{r}
+counties_above_20 <- county_deaths %>%
+  filter(covid_death_percentage >= 20)
+```
+
+```{r}
+ggplot(counties_above_20, aes(x = reorder(CTYNAME, covid_death_percentage), y = covid_death_percentage)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(
+    title = "Counties with COVID Deaths Accounting for 20% or More of Total Deaths (2021)",
+    x = "County",
+    y = "Percentage of COVID Deaths"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+summary(county_deaths)
+```
+
+Question 6:
+
+```{r}
+library(tidyverse)
+library(zoo)
+
+selected_states <- c("New York", "Colorado", "Alabama", "Ohio")
+
+state_covid_data <- covid |> 
+  filter(state %in% selected_states) |>
+  group_by(state, date) |>
+  summarize(daily_cases = sum(cases, na.rm = TRUE), .groups = "drop") |> 
+  arrange(state, date) |> 
+  group_by(state) |>
+  mutate(
+    new_cases = daily_cases - lag(daily_cases, default = first(daily_cases)),  
+    rolling_mean = rollmean(new_cases, k = 7, fill = NA, align = "center")
+  ) |> 
+  ungroup()
+
+```
+
+```{r}
+ggplot(state_covid_data, aes(x = date, y = new_cases, fill = state)) +
+  geom_col(alpha = 0.7, show.legend = FALSE) + 
+  geom_line(aes(y = rolling_mean, color = state), size = 1) +
+  facet_wrap(~ state, scales = "free_y") +
+  labs(title = "Daily New COVID Cases with 7-day Rolling Average",
+       subtitle = "Comparison of New York, Colorado, Alabama, and Ohio",
+       x = "Date", y = "New Cases",
+       caption = "Data Source: NY Times COVID-19 Data") +
+  theme_minimal()
+
+```
+
+```{r}
+state_population <- pop_data |> 
+  group_by(STNAME) |>  
+  summarize(population = sum(POPESTIMATE2021, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+state_population_filtered <- state_population %>%
+  filter(STNAME %in% selected_states)
+
+```
+
+```{r}
+state_covid_per_capita <- state_covid_data %>%
+  left_join(state_population_filtered, by = c("state" = "STNAME")) %>%
+  mutate(
+    cases_per_capita = new_cases / population,
+    rolling_per_capita = rollmean(cases_per_capita, k = 7, fill = NA, align = "center")
+  )
+```
+
+```{r}
+state_covid_per_capita <- state_covid_per_capita %>%
+  filter(!is.na(rolling_per_capita))
+
+```
+
+```{r}
+state_covid_per_capita$date <- as.Date(state_covid_per_capita$date)
+
+```
+
+```{r}
+ggplot(state_covid_per_capita, aes(x = date, y = rolling_per_capita, color = state)) +
+  geom_line() +
+  labs(title = "COVID-19 7-day Rolling Average Per Capita")
+```
+
+Briefly describe the influence scaling by population had on the analysis? Does it make some states look better? Some worse? How so?
+
+Scaling by population impacts how the data is understood. This is because these states have very different population sizes, and we are counting cases per capita. States with larger populations may appear to have less cases than the states with smaller populations. This can potentially cause states with smaller populations to be seen as worse, even though they may have less total cases.
+
+Question 7:
+
+```{r}
+library(readr)
+
+county_centroids <- read_csv('https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/county-centroids.csv')
+
+```
+
+```{r}
+covid_with_locations <- covid %>%
+  mutate(fips = as.character(fips)) %>% 
+  left_join(county_centroids, by = "fips")
+
+```
+
+```{r}
+covid_with_locations$date <- as.Date(covid_with_locations$date)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+```
+
+```{r}
+covid_weighted_mean <- covid_with_locations %>%
+  group_by(date) %>%
+  reframe(
+    weighted_lat = sum(LAT * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE),
+    weighted_lon = sum(LON * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE),
+    total_cases = sum(cases, na.rm = TRUE),
+    month = format(date, "%m")
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(maps)
+```
+
+```{r}
+ggplot() +
+  borders("state", fill = "gray90", colour = "white") +
+  geom_point(data = covid_weighted_mean, aes(x = weighted_lon, y = weighted_lat, size = total_cases, color = month), alpha = 0.7) +
+  scale_size_continuous(name = "Total Cases", range = c(2, 10)) +
+  scale_color_viridis_d(name = "Month") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+```
